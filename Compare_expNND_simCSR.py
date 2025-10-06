@@ -102,13 +102,14 @@ side_length = np.sqrt(area)
 
 NND_file = open_csv(os.path.join(path, NND_file_name))
 
-first_NND = [float(sublist[0]) for sublist in NND_file]
-second_NND = [float(sublist[1]) for sublist in NND_file]
-third_NND = [float(sublist[2]) for sublist in NND_file]
+first_NND = [float(sublist[0]) for sublist in NND_file]  # first NND
+second_NND = [float(sublist[1]) for sublist in NND_file]  # second NND
+third_NND = [float(sublist[2]) for sublist in NND_file]  # thrid NND
 
 # Generate random coordinates for n_points  within the calculated area
-x = np.random.uniform(0, side_length, cluster)
-y = np.random.uniform(0, side_length, cluster)
+cluster_mult = 100  # factor incrasing the number of simulated cluster
+x = np.random.uniform(0, side_length * np.sqrt(cluster_mult), cluster * cluster_mult)
+y = np.random.uniform(0, side_length * np.sqrt(cluster_mult), cluster * cluster_mult)
 CSR_coordinates = np.stack((x, y), axis=1)  # stack arrays
 
 tree = KDTree(CSR_coordinates)  # use KDTree for NND search
@@ -154,21 +155,21 @@ third_NND_cleaned, lower_bound_3, upper_bound_3 = clean_outliers_iqr(third_NND)
 sns.kdeplot(
     data=nn_dist1,
     color="skyblue",
-    linewidth=3,
+    linewidth=2,
     fill=False,       # Optional: Fills the area under the line
     alpha=1,
     label="sim_NND1_kd")        # Transparency for the fill
 sns.kdeplot(
     data=nn_dist2,
     color="navajowhite",
-    linewidth=3,
+    linewidth=2,
     fill=False,       # Optional: Fills the area under the line
     alpha=1,
     label="sim_NND2_kd")        # Transparency for the fill
 sns.kdeplot(
     data=nn_dist3,
     color="mediumaquamarine",
-    linewidth=3,
+    linewidth=2,
     fill=False,       # Optional: Fills the area under the line
     alpha=1,
     label="sim_NND3_kd")         # Transparency for the fill
@@ -176,7 +177,7 @@ sns.kdeplot(
 plt.title("Experimental vs CSR NND: "'{}'.format(density))
 plt.xlabel("nm")
 plt.ylabel("rel. frequency")
-plt.xlim([0, 300])
+plt.xlim([0, 3000])
 
 # Plot experimental data
 plt.hist(first_NND_cleaned, bins='auto', alpha=0.5, label = '1st NND_exp',
