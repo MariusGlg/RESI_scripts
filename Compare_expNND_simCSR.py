@@ -18,27 +18,33 @@ NND_file: name of NND-file (.csv)
 
 
 import numpy as np
-import pandas as pd
 from scipy.spatial import KDTree
 import matplotlib.pyplot as plt
 import csv
 import os
 from configparser import ConfigParser
+import seaborn as sns
+import yaml
 
-#  config.ini file
-config = ConfigParser()
-file = "config.ini"
-config.read(file)
-# config parameter
-path = config["INPUT_FILES"]["path"]
-NND_file_name = config["INPUT_FILES"]["NND_file_name"]
-cluster = int(config["PARAMETERS"]["cluster"])
-area_ROI = int(config["PARAMETERS"]["area_ROI"])
 
-# calculate cluster density
-density = cluster/area_ROI
-# Calculate the required side length of the square plot
-side_length = np.sqrt(area_ROI)
+# --- Configuration Management ---
+def load_config(file_path="config.ini"):
+    """Loads configuration from the specified INI file."""
+    config = ConfigParser()
+    if not config.read(file_path):
+        raise FileNotFoundError(f"Configuration file '{file_path}' not found.")
+
+    path = config["INPUT_FILES"].get("path", "")
+    resi_file_name = config["INPUT_FILES"].get("RESI_file_name", "RESI.hdf5")
+    smlm_cluster_name = config["INPUT_FILES"].get("SMLM_cluster_name", "Cluster.hdf5")
+    resi_yaml_name = config["INPUT_FILES"].get("RESI_yaml_name", "RESI.hdf5")
+    NND_file_name = config["INPUT_FILES"].get("NND_file_name", "clustered_centers_nn.csv")
+
+
+    return path, resi_file_name, smlm_cluster_name, config, resi_yaml_name, NND_file_name
+
+path, resi_file_name, smlm_cluster_name, config, resi_yaml_name, NND_file_name = load_config("config.ini")
+
 
 # Open CSV and plot data
 def open_csv(path):
@@ -47,6 +53,52 @@ def open_csv(path):
         data = list(csvFile)
         # extract NND values from list of lists and store as array
         return data
+
+def calc_density(path, target_keys):
+    """
+    Reads a multi-document YAML file, iterates through all documents,
+    and returns a dictionary of all found target keys and their values.
+    """
+    found_data = {}
+
+    try:
+        with open(path, 'r') as file:
+            # FIX: Use safe_load_all to correctly handle multiple documents ('---')
+            data_documents = list(yaml.safe_load_all(file))
+
+            # Iterate through each document dictionary
+            for doc in data_documents:
+                if isinstance(doc, dict):
+                    # Check each target key against the current document
+                    for key in target_keys:
+                        if key in doc and key not in found_data:
+                            # Store the key/value pair and mark it as found
+                            found_data[key] = doc[key]
+
+            return found_data
+
+    except FileNotFoundError:
+        print(f"Error: File not found at {os.path.abspath(path)}")
+        return None
+    except Exception as e:
+        print(f"An error occurred while loading or searching the YAML: {e}")
+        return None
+
+    except FileNotFoundError:
+        print(f"Error: File not found at {os.path.abspath(path)}")
+        return None
+    except Exception as e:
+        print(f"An error occurred while loading or searching the YAML: {e}")
+        return None
+
+
+target_key_names = ["Number of clusters", "Pick Areas (um^2)"]
+resi_file = os.path.join(path, resi_yaml_name)
+vals = calc_density(resi_file, target_key_names)
+cluster = int(vals["Number of clusters"])
+area = int(vals["Pick Areas (um^2)"][0])
+density = cluster / area
+side_length = np.sqrt(area)
 
 NND_file = open_csv(os.path.join(path, NND_file_name))
 
@@ -66,24 +118,74 @@ nn_dist1 = dists[0][:, 1] * 1000  # first NND convert to nm
 nn_dist2 = dists[0][:, 2] * 1000  # 2nd NND
 nn_dist3 = dists[0][:, 3] * 1000  # 3rd NND
 
+# --- Outlier Removal using IQR ---
+def clean_outliers_iqr(data):
+    """
+    Converts data to a NumPy array (if necessary) and filters out outliers
+    using the 1.5 * IQR rule.
+    """
+    # Ensure data is a NumPy array for proper filtering
+    data_array = np.array(data)
+
+    # 1. Calculate Q1, Q3, and IQR
+    Q1 = np.percentile(data_array, 25)
+    Q3 = np.percentile(data_array, 75)
+    IQR = Q3 - Q1
+
+    # 2. Define the bounds
+    lower_bound = Q1 - (1.5 * IQR)
+    upper_bound = Q3 + (1.5 * IQR)
+
+    # 3. Filter and return the cleaned data
+    cleaned_data = data_array[
+        (data_array >= lower_bound) & (data_array <= upper_bound)
+    ]
+    return cleaned_data, lower_bound, upper_bound
+
+# --- APPLY THE FUNCTION TO YOUR DATASETS ---
+
+# This replaces all the repetitive code from your original block.
+first_NND_cleaned, lower_bound_1, upper_bound_1 = clean_outliers_iqr(first_NND)
+second_NND_cleaned, lower_bound_2, upper_bound_2 = clean_outliers_iqr(second_NND)
+third_NND_cleaned, lower_bound_3, upper_bound_3 = clean_outliers_iqr(third_NND)
+
 # Histogram
-plt.hist(nn_dist1, bins = 100, alpha=0.5, label = '1st NND_sim', weights=np.ones_like(nn_dist1) / len(nn_dist1),
-         histtype='step', linewidth=2)
-plt.hist(nn_dist2, bins = 100, alpha=0.5, label = '2nd NND_sim', weights=np.ones_like(nn_dist2) / len(nn_dist2),
-         histtype='step', linewidth=2)
-plt.hist(nn_dist3, bins = 100, alpha=0.5, label = '3rd NND_sim', weights=np.ones_like(nn_dist3) / len(nn_dist3),
-         histtype='step', linewidth=2)
+# Plot simulation
+sns.kdeplot(
+    data=nn_dist1,
+    color="skyblue",
+    linewidth=3,
+    fill=False,       # Optional: Fills the area under the line
+    alpha=1,
+    label="sim_NND1_kd")        # Transparency for the fill
+sns.kdeplot(
+    data=nn_dist2,
+    color="navajowhite",
+    linewidth=3,
+    fill=False,       # Optional: Fills the area under the line
+    alpha=1,
+    label="sim_NND2_kd")        # Transparency for the fill
+sns.kdeplot(
+    data=nn_dist3,
+    color="mediumaquamarine",
+    linewidth=3,
+    fill=False,       # Optional: Fills the area under the line
+    alpha=1,
+    label="sim_NND3_kd")         # Transparency for the fill
+
 plt.title("Experimental vs CSR NND: "'{}'.format(density))
 plt.xlabel("nm")
 plt.ylabel("rel. frequency")
-plt.xlim([0, 500])
-# Plot experimenta data
-plt.hist(first_NND, bins = 100, alpha=0.5, label = '1st NND_exp',
-         weights=np.ones_like(first_NND) / len(first_NND), edgecolor = "black", color = "skyblue")
-plt.hist(second_NND, bins = 100, alpha=0.5, label = '1st NND_exp',
-         weights=np.ones_like(second_NND) / len(second_NND), edgecolor = "black", color = "navajowhite")
-plt.hist(third_NND, bins = 100, alpha=0.5, label = '1st NND_exp',
-         weights=np.ones_like(third_NND) / len(third_NND), edgecolor = "black", color = "mediumaquamarine")
+plt.xlim([0, 300])
+
+# Plot experimental data
+plt.hist(first_NND_cleaned, bins='auto', alpha=0.5, label = '1st NND_exp',
+         density=True, edgecolor = "black", color = "skyblue")
+plt.hist(second_NND_cleaned, bins='auto', alpha=0.5, label = '1st NND_exp',
+         density=True, edgecolor = "black", color = "navajowhite")
+plt.hist(third_NND_cleaned, bins='auto', alpha=0.5, label = '1st NND_exp',
+         density=True, edgecolor = "black", color = "mediumaquamarine")
+
 plt.legend()
 plt.savefig(os.path.join(path, "compare_CSR_NND.png"))
 plt.show()
